@@ -159,82 +159,62 @@ function pastePlaylist() {
 
                 console.log("Retrieved playlist data for pasting:", result.playlistData);
 
-                // Get the first song to add
-                const firstSong = result.playlistData[0];
-                console.log("Attempting to add song:", firstSong);
+                // Create a copy of the playlist data that we can modify
+                const songsToProcess = [...result.playlistData];
+                const totalSongs = songsToProcess.length;
+                let successCount = 0;
+                let failCount = 0;
 
-                // Step 1: Find the search input
-                const searchInput = findSpotifySearchInput();
-                if (!searchInput) {
-                    console.error("Could not find Spotify search input");
-                    resolve({
-                        success: false,
-                        message: 'Could not find Spotify search input. Navigate to a playlist page.'
-                    });
-                    return;
+                // Process songs recursively
+                function processNextSong(index) {
+                    // If we've processed all songs, return the final result
+                    if (index >= songsToProcess.length) {
+                        resolve({
+                            success: true,
+                            message: `Added ${successCount} songs successfully, ${failCount} failed.`
+                        });
+                        return;
+                    }
+
+                    // Get the current song
+                    const currentSong = songsToProcess[index];
+                    console.log(`Processing song ${index + 1}/${songsToProcess.length}:`, currentSong.name);
+
+                    // Try to add this song
+                    addSongToPlaylist(currentSong)
+                        .then(success => {
+                            if (success) {
+                                successCount++;
+                                console.log(`Successfully added "${currentSong.name}" (${index + 1}/${totalSongs})`);
+                            } else {
+                                failCount++;
+                                console.log(`Failed to add "${currentSong.name}" (${index + 1}/${totalSongs})`);
+                            }
+
+                            // Process the next song after a short delay to avoid overwhelming Spotify
+                            setTimeout(() => {
+                                processNextSong(index + 1);
+                            }, 1500);
+                        })
+                        .catch(err => {
+                            console.error(`Error adding song "${currentSong.name}":`, err);
+                            failCount++;
+
+                            // Continue with next song despite error
+                            setTimeout(() => {
+                                processNextSong(index + 1);
+                            }, 1500);
+                        });
                 }
 
-                console.log("Found Spotify search input:", searchInput);
+                // Start processing from the first song
+                processNextSong(0);
 
-                // Step 2: Construct and set the search query
-                const searchQuery = constructSearchQuery(firstSong);
-                console.log(`Searching for: "${searchQuery}"`);
-
-                // Focus the input and clear any existing value
-                searchInput.focus();
-                searchInput.value = '';
-
-                // Set the new value
-                searchInput.value = searchQuery;
-
-                // Step 3: Trigger search events to make Spotify recognize the input
-                triggerInputEvents(searchInput);
-
-                // Step 4: Wait for search results before trying to find the song
-                console.log("Waiting for search results...");
-                setTimeout(() => {
-                    // Try to find song rows after search results load
-                    const songRows = findSpotifySongRows();
-                    if (!songRows || songRows.length === 0) {
-                        console.error("Could not find any song rows after search");
-                        resolve({
-                            success: false,
-                            message: 'Could not find song rows. Make sure search results appeared.'
-                        });
-                        return;
-                    }
-
-                    console.log(`Found ${songRows.length} song rows after search`);
-
-                    // Get the first song row to add
-                    const firstSongRow = songRows[0];
-                    console.log("First song row:", firstSongRow);
-
-                    // Try to find the add button in this row
-                    const addButton = findAddButtonInRow(firstSongRow);
-                    if (!addButton) {
-                        console.error("Could not find add button in song row");
-                        resolve({
-                            success: false,
-                            message: 'Could not find add button. Try hovering over a song to show the buttons.'
-                        });
-                        return;
-                    }
-
-                    console.log("Found add button:", addButton);
-
-                    // Simulate hovering over the row to make button visible if needed
-                    simulateHover(firstSongRow);
-
-                    // Click the add button
-                    console.log("Clicking add button...");
-                    addButton.click();
-
-                    resolve({
-                        success: true,
-                        message: `Added "${firstSong.name}" to playlist. ${result.playlistData.length - 1} songs remaining.`
-                    });
-                }, 2000); // Wait 2 seconds for search results to load
+                // Return an initial message that will be updated when the process completes
+                resolve({
+                    success: true,
+                    message: `Started adding ${totalSongs} songs to playlist...`
+                });
             });
         });
     } catch (error) {
@@ -244,6 +224,94 @@ function pastePlaylist() {
             message: `Error pasting playlist: ${error.message}`
         };
     }
+}
+function addSongToPlaylist(song) {
+    return new Promise((resolve) => {
+        try {
+            // Step 1: Find the search input
+            const searchInput = findSpotifySearchInput();
+            if (!searchInput) {
+                console.error("Could not find Spotify search input");
+                resolve(false);
+                return;
+            }
+
+            console.log("Found Spotify search input");
+
+            // Step 2: Construct and set the search query
+            const searchQuery = constructSearchQuery(song);
+            console.log(`Searching for: "${searchQuery}"`);
+
+            // Focus the input and clear any existing value
+            searchInput.focus();
+            searchInput.value = '';
+
+            // Set the new value
+            searchInput.value = searchQuery;
+
+            // Step 3: Trigger search events to make Spotify recognize the input
+            triggerInputEvents(searchInput);
+
+            // Step 4: Wait for search results before trying to find the song
+            console.log("Waiting for search results to load...");
+            setTimeout(() => {
+                try {
+                    console.log("Checking for song rows in search results...");
+                    // Try to find song rows after search results load
+                    const songRows = findSpotifySongRows();
+                    if (!songRows || songRows.length === 0) {
+                        console.error("Could not find any song rows after search");
+                        resolve(false);
+                        return;
+                    }
+
+                    console.log(`Found ${songRows.length} song rows after search`);
+
+                    // Get the first song row to add
+                    const firstSongRow = songRows[1];
+                    console.log("First song row:", firstSongRow);
+
+                    // Wait an additional second for the DOM to fully stabilize
+                    console.log("Waiting for DOM to stabilize before clicking add button...");
+                    setTimeout(() => {
+                        try {
+                            // Try to find the add button in this row
+                            const addButton = findAddButtonInRow(firstSongRow);
+                            if (!addButton) {
+                                console.error("Could not find add button in song row");
+                                resolve(false);
+                                return;
+                            }
+
+                            console.log("Found add button");
+
+                            // Simulate hovering over the row to make button visible if needed
+                            simulateHover(firstSongRow);
+
+                            // Wait a short time after hover for any hover effects to appear
+                            setTimeout(() => {
+                                // Click the add button
+                                console.log("Clicking add button...");
+                                addButton.click();
+
+                                // Consider it successful if we got this far
+                                resolve(true);
+                            }, 200);
+                        } catch (error) {
+                            console.error("Error finding or clicking add button:", error);
+                            resolve(false);
+                        }
+                    }, 1000); // Wait 1 additional second for DOM to stabilize
+                } catch (error) {
+                    console.error("Error in search results processing:", error);
+                    resolve(false);
+                }
+            }, 2000); // Wait 2 seconds for search results to load
+        } catch (error) {
+            console.error("Error in addSongToPlaylist:", error);
+            resolve(false);
+        }
+    });
 }
 function triggerInputEvents(input) {
     if (!input) return;
@@ -283,30 +351,18 @@ function triggerInputEvents(input) {
 /**
  * Find song rows in Spotify search results
  */
+//TODO
 function findSpotifySongRows() {
-    // Look for divs with role="row"
-    const songRows = document.querySelectorAll('div[role="row"]');
+    // Select all elements with role="row" and aria-rowindex (excluding header row if needed)
+    const songRows = document.querySelectorAll('div[role="row"][aria-rowindex]');
 
-    // Log details of each row for debugging
-    if (songRows && songRows.length > 0) {
-        songRows.forEach((row, i) => {
-            console.log(`Song row #${i}:`, {
-                rowIndex: row.getAttribute('aria-rowindex'),
-                selected: row.getAttribute('aria-selected'),
-                text: row.textContent.substring(0, 50) + '...' // Show first 50 chars
-            });
-        });
-        return songRows;
-    }
+    const validSongRows = Array.from(songRows).filter(row => {
+        const gridCells = row.querySelectorAll('div[role="gridcell"]');
+        return gridCells.length >= 4;
+    });
 
-    // Fallback: look for any elements that might contain song information
-    const alternativeSongRows = document.querySelectorAll('[data-testid="tracklist-row"], .tracklist-row');
-    if (alternativeSongRows && alternativeSongRows.length > 0) {
-        console.log("Found alternative song rows:", alternativeSongRows.length);
-        return alternativeSongRows;
-    }
-
-    return [];
+    console.log(`Found ${validSongRows.length} valid song rows`);
+    return validSongRows;
 }
 
 /**
