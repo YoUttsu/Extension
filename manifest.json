@@ -3,7 +3,7 @@
   "name": "Playlist Mover",
   "version": "1.0",
   "description": "Copy playlists between music streaming services",
-  "permissions": ["activeTab", "storage"],
+  "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": [
     "*://*.jiosaavn.com/*",
     "*://*.spotify.com/*"
@@ -20,7 +20,7 @@
     {
       "matches": ["*://*.jiosaavn.com/*", "*://*.spotify.com/*"],
       "js": ["content.js"],
-      "run_at": "document_end"
+      "run_at": "document_idle"
     }
   ],
   "icons": {

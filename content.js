@@ -8,7 +8,10 @@ console.log("Playlist Mover content script loaded successfully");
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     console.log("Message received:", request);
 
-    if (request.action === "copy") {
+    if (request.action === "ping") {
+        // Respond to ping to confirm content script is loaded
+        sendResponse({ status: "ok" });
+    } else if (request.action === "copy") {
         const result = copyPlaylist();
         console.log("Copy result:", result);
         sendResponse(result);
@@ -143,60 +146,95 @@ function pastePlaylist() {
             };
         }
 
-        // Find the main tag and log input elements inside it
-        const mainElement = document.getElementById('main') || document.querySelector('main');
-        if (mainElement) {
-            // Find all input elements inside main
-            const inputElements = mainElement.querySelectorAll('input');
-
-            console.log(`Found ${inputElements.length} input elements inside main tag`);
-            inputElements.forEach((input, index) => {
-                console.log(`Input #${index + 1}:`, {
-                    type: input.type,
-                    id: input.id,
-                    name: input.name,
-                    placeholder: input.placeholder,
-                    value: input.value,
-                    className: input.className
-                });
-            });
-
-            // Also log the search input if one exists
-            const searchInput = mainElement.querySelector('input[placeholder*="search" i], input[aria-label*="search" i]');
-            if (searchInput) {
-                console.log("Found search input:", searchInput);
-            }
-        } else {
-            console.log("No main element found on this page");
-        }
-
         // Check if we have playlist data
         return new Promise((resolve) => {
             chrome.storage.local.get("playlistData", function(result) {
-                if (result.playlistData && result.playlistData.length > 0) {
-                    console.log("Retrieved playlist data for pasting:", result.playlistData);
-
-                    // For now, just log the songs we would be adding
-                    let songsToAdd = result.playlistData.map(song => {
-                        // Format the song data for display
-                        const artistsText = song.artists && song.artists.length > 0 ?
-                            song.artists.join(", ") : 'Unknown Artist';
-
-                        return `${song.name} by ${artistsText}`;
-                    });
-
-                    console.log("Songs to add to Spotify playlist:", songsToAdd);
-
-                    resolve({
-                        success: false,
-                        message: `Found ${result.playlistData.length} songs. Paste functionality coming soon!`
-                    });
-                } else {
+                if (!result.playlistData || result.playlistData.length === 0) {
                     resolve({
                         success: false,
                         message: 'No playlist data found. Copy a playlist first!'
                     });
+                    return;
                 }
+
+                console.log("Retrieved playlist data for pasting:", result.playlistData);
+
+                // Get the first song to add
+                const firstSong = result.playlistData[0];
+                console.log("Attempting to add song:", firstSong);
+
+                // Step 1: Find the search input
+                const searchInput = findSpotifySearchInput();
+                if (!searchInput) {
+                    console.error("Could not find Spotify search input");
+                    resolve({
+                        success: false,
+                        message: 'Could not find Spotify search input. Navigate to a playlist page.'
+                    });
+                    return;
+                }
+
+                console.log("Found Spotify search input:", searchInput);
+
+                // Step 2: Construct and set the search query
+                const searchQuery = constructSearchQuery(firstSong);
+                console.log(`Searching for: "${searchQuery}"`);
+
+                // Focus the input and clear any existing value
+                searchInput.focus();
+                searchInput.value = '';
+
+                // Set the new value
+                searchInput.value = searchQuery;
+
+                // Step 3: Trigger search events to make Spotify recognize the input
+                triggerInputEvents(searchInput);
+
+                // Step 4: Wait for search results before trying to find the song
+                console.log("Waiting for search results...");
+                setTimeout(() => {
+                    // Try to find song rows after search results load
+                    const songRows = findSpotifySongRows();
+                    if (!songRows || songRows.length === 0) {
+                        console.error("Could not find any song rows after search");
+                        resolve({
+                            success: false,
+                            message: 'Could not find song rows. Make sure search results appeared.'
+                        });
+                        return;
+                    }
+
+                    console.log(`Found ${songRows.length} song rows after search`);
+
+                    // Get the first song row to add
+                    const firstSongRow = songRows[0];
+                    console.log("First song row:", firstSongRow);
+
+                    // Try to find the add button in this row
+                    const addButton = findAddButtonInRow(firstSongRow);
+                    if (!addButton) {
+                        console.error("Could not find add button in song row");
+                        resolve({
+                            success: false,
+                            message: 'Could not find add button. Try hovering over a song to show the buttons.'
+                        });
+                        return;
+                    }
+
+                    console.log("Found add button:", addButton);
+
+                    // Simulate hovering over the row to make button visible if needed
+                    simulateHover(firstSongRow);
+
+                    // Click the add button
+                    console.log("Clicking add button...");
+                    addButton.click();
+
+                    resolve({
+                        success: true,
+                        message: `Added "${firstSong.name}" to playlist. ${result.playlistData.length - 1} songs remaining.`
+                    });
+                }, 2000); // Wait 2 seconds for search results to load
             });
         });
     } catch (error) {
@@ -206,4 +244,206 @@ function pastePlaylist() {
             message: `Error pasting playlist: ${error.message}`
         };
     }
+}
+function triggerInputEvents(input) {
+    if (!input) return;
+
+    // Create and dispatch an input event
+    const inputEvent = new Event('input', {
+        bubbles: true,
+        cancelable: true,
+    });
+    input.dispatchEvent(inputEvent);
+
+    // Create and dispatch a change event
+    const changeEvent = new Event('change', {
+        bubbles: true,
+        cancelable: true,
+    });
+    input.dispatchEvent(changeEvent);
+
+    // Create and dispatch a keydown event for Enter key
+    const keydownEvent = new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        key: 'Enter',
+        keyCode: 13
+    });
+    input.dispatchEvent(keydownEvent);
+
+    // Create and dispatch a keyup event for Enter key
+    const keyupEvent = new KeyboardEvent('keyup', {
+        bubbles: true,
+        cancelable: true,
+        key: 'Enter',
+        keyCode: 13
+    });
+    input.dispatchEvent(keyupEvent);
+}
+/**
+ * Find song rows in Spotify search results
+ */
+function findSpotifySongRows() {
+    // Look for divs with role="row"
+    const songRows = document.querySelectorAll('div[role="row"]');
+
+    // Log details of each row for debugging
+    if (songRows && songRows.length > 0) {
+        songRows.forEach((row, i) => {
+            console.log(`Song row #${i}:`, {
+                rowIndex: row.getAttribute('aria-rowindex'),
+                selected: row.getAttribute('aria-selected'),
+                text: row.textContent.substring(0, 50) + '...' // Show first 50 chars
+            });
+        });
+        return songRows;
+    }
+
+    // Fallback: look for any elements that might contain song information
+    const alternativeSongRows = document.querySelectorAll('[data-testid="tracklist-row"], .tracklist-row');
+    if (alternativeSongRows && alternativeSongRows.length > 0) {
+        console.log("Found alternative song rows:", alternativeSongRows.length);
+        return alternativeSongRows;
+    }
+
+    return [];
+}
+
+/**
+ * Find the add button within a song row
+ */
+function findAddButtonInRow(songRow) {
+    // Try to find all divs in the row
+    const divs = songRow.querySelectorAll('div');
+    console.log(`Found ${divs.length} divs in song row`);
+
+    // If we have at least 4 divs, try to get the button in the 4th one
+    if (divs.length >= 4) {
+        const fourthDiv = divs[3]; // 0-based index, so 3 is the 4th div
+        const button = fourthDiv.querySelector('button');
+
+        if (button) {
+            return button;
+        }
+    }
+
+    // Alternative approach: look for any button in the row that might be the add button
+    const buttons = songRow.querySelectorAll('button');
+    console.log(`Found ${buttons.length} buttons in song row`);
+
+    for (let button of buttons) {
+        // Look for buttons that have add-related attributes or text content
+        if (
+            button.getAttribute('aria-label')?.toLowerCase().includes('add') ||
+            button.textContent?.toLowerCase().includes('add') ||
+            button.title?.toLowerCase().includes('add')
+        ) {
+            return button;
+        }
+
+        // If we can't find a specific "add" button, return the last button which often represents actions
+        if (buttons.length > 0) {
+            return buttons[buttons.length - 1];
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Simulate hovering over an element to make buttons visible
+ */
+function simulateHover(element) {
+    if (!element) return;
+
+    // Create and dispatch a mouse enter event
+    const mouseEnter = new MouseEvent('mouseenter', {
+        bubbles: true,
+        cancelable: true,
+        view: window
+    });
+
+    element.dispatchEvent(mouseEnter);
+
+    // Also try to add a hover class if that's what Spotify uses
+    element.classList.add('hover');
+}
+
+/**
+ * Find Spotify's search input field
+ */
+function findSpotifySearchInput() {
+    // First priority: Look specifically for the Spotify search placeholder
+    const spotifySearchInput = document.querySelector('input[placeholder="Search for songs or episodes"]');
+    if (spotifySearchInput) {
+        console.log("Found Spotify search input by exact placeholder match");
+        return spotifySearchInput;
+    }
+
+    // Second priority: Look for inputs with similar placeholders (in case text varies slightly)
+    const similarPlaceholders = document.querySelectorAll('input[placeholder*="Search for" i]');
+    if (similarPlaceholders.length > 0) {
+        console.log("Found input with similar placeholder");
+        return similarPlaceholders[0];
+    }
+
+    // Third priority: Look for standard search inputs
+    const searchInputs = document.querySelectorAll('input[type="search"], input[placeholder*="search" i], input[aria-label*="search" i]');
+    if (searchInputs.length > 0) {
+        console.log(`Found ${searchInputs.length} search inputs`);
+        return searchInputs[0];
+    }
+
+    // Fourth priority: Look in the main element
+    const mainElement = document.querySelector('main');
+    if (mainElement) {
+        const inputs = mainElement.querySelectorAll('input');
+        console.log(`Found ${inputs.length} inputs in main element`);
+
+        inputs.forEach((input, i) => {
+            console.log(`Input #${i}:`, {
+                type: input.type,
+                placeholder: input.placeholder || "No placeholder",
+                ariaLabel: input.getAttribute('aria-label') || "No aria-label",
+                className: input.className
+            });
+        });
+
+        if (inputs.length === 1) return inputs[0];
+
+        // Try to find a text or search input
+        for (let input of inputs) {
+            if (input.type === 'text' || input.type === 'search' || !input.type) {
+                return input;
+            }
+        }
+    }
+
+    // Final fallback: Try to find any input that might be a search box
+    const allInputs = document.querySelectorAll('input');
+    console.log(`Found ${allInputs.length} total inputs on page`);
+
+    for (let input of allInputs) {
+        const placeholder = input.placeholder?.toLowerCase() || '';
+        if (placeholder.includes('search')) {
+            console.log("Found input with search in placeholder:", input);
+            return input;
+        }
+    }
+
+    console.log("Could not find any suitable search input");
+    return null;
+}
+/**
+ * Construct a search query for a song
+ */
+function constructSearchQuery(song) {
+    let query = song.name || '';
+
+    // Add first artist if available
+    if (song.artists && song.artists.length > 0) {
+        query += ' ' + song.artists[0];
+    }
+
+    return query.trim();
 }
