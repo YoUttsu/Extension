@@ -247,10 +247,11 @@ function addSongToPlaylist(song) {
             searchInput.value = '';
 
             // Set the new value
-            searchInput.value = searchQuery;
-
+            setTimeout(() => {
+                searchInput.value = searchQuery;
+                triggerInputEvents(searchInput);
+            }, 500);
             // Step 3: Trigger search events to make Spotify recognize the input
-            triggerInputEvents(searchInput);
 
             // Step 4: Wait for search results before trying to find the song
             console.log("Waiting for search results to load...");
@@ -268,7 +269,7 @@ function addSongToPlaylist(song) {
                     console.log(`Found ${songRows.length} song rows after search`);
 
                     // Get the first song row to add
-                    const firstSongRow = songRows[1];
+                    const firstSongRow = songRows[0];
                     console.log("First song row:", firstSongRow);
 
                     // Wait an additional second for the DOM to fully stabilize
@@ -301,12 +302,12 @@ function addSongToPlaylist(song) {
                             console.error("Error finding or clicking add button:", error);
                             resolve(false);
                         }
-                    }, 1000); // Wait 1 additional second for DOM to stabilize
+                    }, 3000); // Wait 1 additional second for DOM to stabilize
                 } catch (error) {
                     console.error("Error in search results processing:", error);
                     resolve(false);
                 }
-            }, 2000); // Wait 2 seconds for search results to load
+            }, 4000); // Wait 2 seconds for search results to load
         } catch (error) {
             console.error("Error in addSongToPlaylist:", error);
             resolve(false);
@@ -354,13 +355,13 @@ function triggerInputEvents(input) {
 //TODO
 function findSpotifySongRows() {
     // Select all elements with role="row" and aria-rowindex (excluding header row if needed)
-    const songRows = document.querySelectorAll('div[role="row"][aria-rowindex]');
+    const songRows = document.querySelectorAll('div[role="row"][aria-rowindex="1"]');
 
     const validSongRows = Array.from(songRows).filter(row => {
         const gridCells = row.querySelectorAll('div[role="gridcell"]');
         return gridCells.length >= 4;
     });
-
+    console.log(validSongRows)
     console.log(`Found ${validSongRows.length} valid song rows`);
     return validSongRows;
 }
